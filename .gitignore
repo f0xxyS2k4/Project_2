@@ -1,0 +1,16 @@
+# Bỏ qua thư mục ảo
+.venv/
+venv/
+env/
+
+
+tiki_data/
+tiki_errors.csv
+
+
+*.csv
+
+
+.idea/
+__pycache__/
+*.pyc
