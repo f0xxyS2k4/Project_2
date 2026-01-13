@@ -11,21 +11,19 @@ import pandas as pd
 # --- config ---
 INPUT_FILE = '/home/cahara/Downloads/products-0-200000.csv'
 
-OUTPUT_DIR = 'tiki_data'  # Thư mục lưu data
-ERROR_FILE = 'tiki_errors.csv'  # Tên file lưu lỗi
-BATCH_SIZE = 1000  # Số lượng ID/file json
-CONCURRENT_LIMIT = 20  # Số luồng chạy song song
+OUTPUT_DIR = 'tiki_data'
+ERROR_FILE = 'tiki_errors.csv'
+BATCH_SIZE = 1000
+CONCURRENT_LIMIT = 20
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Referer': 'https://tiki.vn/'
 }
 
-# Tạo thư mục output
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def clean_description(html_content):
-    """Chuẩn hoá description."""
     if not html_content:
         return ""
     try:
@@ -37,7 +35,6 @@ def clean_description(html_content):
 
 
 async def fetch_product(session, product_id):
-    """Tải thông tin 1 sản phẩm."""
     url = f"https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
     try:
         async with session.get(url, headers=HEADERS, timeout=20) as response:
@@ -61,7 +58,6 @@ async def fetch_product(session, product_id):
 
 
 def append_errors_to_csv(error_list):
-    """Ghi nối tiếp danh sách lỗi vào file CSV duy nhất."""
     file_exists = os.path.isfile(ERROR_FILE)
 
     with open(ERROR_FILE, mode='a', newline='', encoding='utf-8') as f:
@@ -76,7 +72,6 @@ def append_errors_to_csv(error_list):
 
 
 async def process_batch(session, batch_ids, batch_index, semaphore):
-    """Xử lý 1 lô, lưu thành công ra JSON riêng, lỗi ghi vào CSV chung."""
     tasks = []
     for pid in batch_ids:
         async def sem_task(pid):
@@ -90,13 +85,12 @@ async def process_batch(session, batch_ids, batch_index, semaphore):
     success_items = [r["data"] for r in results if r["status"] == "success"]
     error_items = [r for r in results if r["status"] == "error"]
 
-    # 1. Lưu file thành công (nếu có)
     if success_items:
         success_file = f"{OUTPUT_DIR}/batch_{batch_index}.json"
         with open(success_file, 'w', encoding='utf-8') as f:
             json.dump(success_items, f, ensure_ascii=False, indent=4)
 
-    # 2. Ghi lỗi vào file chung (nếu có)
+    #ghi loi
     if error_items:
         append_errors_to_csv(error_items)
         print(f"  [!] Batch {batch_index}: Có {len(error_items)} lỗi -> Đã ghi vào {ERROR_FILE}")
@@ -105,13 +99,10 @@ async def process_batch(session, batch_ids, batch_index, semaphore):
 
 
 async def main():
-    # --- ĐỌC FILE CSV ---
     print(f"Đang đọc file: {INPUT_FILE} ...")
     try:
         df = pd.read_csv(INPUT_FILE)
-        # Lấy cột đầu tiên làm ID
         all_ids = df.iloc[:, 0].astype(str).tolist()
-        # Lọc ID chỉ chứa số
         all_ids = [pid for pid in all_ids if pid.isdigit()]
     except Exception as e:
         print(f"LỖI ĐỌC FILE: {e}")
@@ -121,7 +112,6 @@ async def main():
     total_products = len(all_ids)
     print(f"Tổng số ID tìm thấy: {total_products}")
 
-    # Xoá file lỗi cũ nếu muốn chạy lại từ đầu (để tránh ghi đè lẫn lộn)
     if os.path.exists(ERROR_FILE):
         print(f"Lưu ý: File {ERROR_FILE} cũ sẽ được ghi nối tiếp.")
 
@@ -133,7 +123,7 @@ async def main():
         for index, batch_ids in enumerate(chunks):
             print(f"Đang chạy Batch {index + 1}/{len(chunks)}...")
             await process_batch(session, batch_ids, index + 1, semaphore)
-            await asyncio.sleep(1)  # Nghỉ nhẹ
+            await asyncio.sleep(1)
 
         print(f"\nHOÀN THÀNH! Tổng thời gian: {time.time() - start_time:.2f}s")
 
