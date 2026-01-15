@@ -14,9 +14,8 @@ import pandas as pd
 # --- CẤU HÌNH ---
 INPUT_FILE = '/home/cahara/Downloads/products-0-200000.csv'
 
-# Tự động xác định thư mục project cha
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)  # Lùi ra khỏi folder src
+project_root = os.path.dirname(current_dir)
 
 OUTPUT_DIR = os.path.join(project_root, 'data', 'json_result')
 ERROR_FILE = os.path.join(project_root, 'data', 'logs', 'tiki_errors.csv')
@@ -28,15 +27,14 @@ HEADERS = {
     'Referer': 'https://tiki.vn/'
 }
 
-# Tạo thư mục nếu chưa có
 try:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(os.path.dirname(ERROR_FILE), exist_ok=True)
-except:
-    pass
+except Exception as e:
+    print(f"⚠️ Cảnh báo tạo thư mục: {e}", file=sys.stderr)
 
 
-# --- 1. HÀM CHECK TIẾN ĐỘ CŨ (RESUME) ---
+# --- 1. HÀM CHECK TIẾN ĐỘ ---
 def get_completed_batch_count():
     files = glob.glob(os.path.join(OUTPUT_DIR, "batch_*.json"))
     if not files:
@@ -53,7 +51,7 @@ def get_completed_batch_count():
     return max_batch
 
 
-# --- 2. HÀM XỬ LÝ TEXT ---
+# --- 2. XỬ LÝ TEXT ---
 def clean_description(html_content):
     if not html_content:
         return ""
@@ -65,7 +63,7 @@ def clean_description(html_content):
         return str(html_content)
 
 
-# --- 3. HÀM GỌI API ---
+# --- 3. GỌI API ---
 async def fetch_product(session, product_id):
     url = f"https://api.tiki.vn/product-detail/api/v1/products/{product_id}"
     try:
@@ -90,7 +88,7 @@ async def fetch_product(session, product_id):
         return {"status": "error", "id": product_id, "reason": str(e)}
 
 
-# --- 4. HÀM GHI LỖI ---
+# --- 4. GHI LOG LỖI (Đã có Exception) ---
 def append_errors_to_csv(error_list):
     file_exists = os.path.isfile(ERROR_FILE)
     try:
@@ -102,10 +100,10 @@ def append_errors_to_csv(error_list):
             for err in error_list:
                 writer.writerow([err['id'], now, err['reason']])
     except Exception as e:
-        print(f"Lỗi ghi file log: {e}")
+        print(f"❌ LỖI GHI LOG CSV: {e}", file=sys.stderr)
 
 
-# --- 5. XỬ LÝ BATCH ---
+# --- 5. XỬ LÝ BATCH (Đã thêm Exception cho JSON) ---
 async def process_batch(session, batch_ids, batch_index, semaphore):
     tasks = []
     for pid in batch_ids:
@@ -119,29 +117,39 @@ async def process_batch(session, batch_ids, batch_index, semaphore):
     success_items = [r["data"] for r in results if r["status"] == "success"]
     error_items = [r for r in results if r["status"] == "error"]
 
+    # --- [UPDATE] Exception handling cho việc lưu Database (JSON File) ---
     if success_items:
-        success_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index}.json")
-        with open(success_file, 'w', encoding='utf-8') as f:
-            json.dump(success_items, f, ensure_ascii=False, indent=4)
+        try:
+            success_file = os.path.join(OUTPUT_DIR, f"batch_{batch_index}.json")
+            with open(success_file, 'w', encoding='utf-8') as f:
+                json.dump(success_items, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            # Nếu lỗi lưu file (ổ đầy, lỗi quyền), in lỗi ra và KHÔNG crash chương trình
+            print(f"❌ LỖI NGHIÊM TRỌNG: Không thể lưu file batch_{batch_index}.json. Lý do: {e}", file=sys.stderr)
+            # Tùy chọn: Có thể throw lỗi để Bot biết nếu muốn dừng hẳn
+            # raise e
 
     if error_items:
         append_errors_to_csv(error_items)
 
-    # In ra terminal (flush=True để bot đọc được ngay)
     print(f"--> Batch {batch_index}: Xong {len(success_items)} sản phẩm. (Lỗi: {len(error_items)})", flush=True)
 
 
-# --- 6. MAIN ---
+# --- 6. MAIN (Đã có Exception đầu vào) ---
 async def main():
-
     print(f"Đang đọc file: {INPUT_FILE} ...", flush=True)
+
+    # --- [CHECK] Exception handling cho việc đọc file ---
     try:
         df = pd.read_csv(INPUT_FILE)
         all_ids = df.iloc[:, 0].astype(str).tolist()
         all_ids = [pid for pid in all_ids if pid.isdigit()]
+    except FileNotFoundError:
+        print(f"❌ LỖI: Không tìm thấy file {INPUT_FILE}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"LỖI ĐỌC FILE: {e}", flush=True)
-        sys.exit(1)  # Báo lỗi cho Bot biết
+        print(f"❌ LỖI ĐỌC DATA ĐẦU VÀO: {e}", file=sys.stderr)
+        sys.exit(1)
 
     total_products = len(all_ids)
     print(f"Tổng số ID tìm thấy: {total_products}", flush=True)
@@ -155,7 +163,6 @@ async def main():
 
     chunks = [all_ids[i:i + BATCH_SIZE] for i in range(0, total_products, BATCH_SIZE)]
 
-    # FIX IPv4 CHO MÁY ẢO
     connector = aiohttp.TCPConnector(limit=CONCURRENT_LIMIT, family=socket.AF_INET, ssl=False)
     semaphore = asyncio.Semaphore(CONCURRENT_LIMIT)
 
@@ -164,7 +171,6 @@ async def main():
         for index, batch_ids in enumerate(chunks):
             current_batch_num = index + 1
 
-            # Nếu batch này đã làm rồi thì bỏ qua
             if current_batch_num <= completed_batches:
                 continue
 
@@ -185,6 +191,5 @@ if __name__ == "__main__":
         print("Dừng bởi người dùng.", flush=True)
         sys.exit(0)
     except Exception as e:
-        # Bắt buộc in ra lỗi và exit(1) để Bot Discord biết là có biến
-        print(f"CRASH: {e}", file=sys.stderr)
+        print(f"CRASH TOÀN BỘ: {e}", file=sys.stderr)
         sys.exit(1)
