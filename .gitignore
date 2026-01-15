@@ -4,10 +4,8 @@ venv/
 env/
 
 
-tiki_data/
-tiki_errors.csv
-
-
+data/
+errors.csv
 *.csv
 
 

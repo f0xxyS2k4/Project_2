@@ -14,7 +14,7 @@ DB_CONFIG = {
     "port": "5432"
 }
 
-DATA_DIR = 'tiki_data'
+DATA_DIR = '../data'
 
 
 def create_table_if_not_exists(cursor):
