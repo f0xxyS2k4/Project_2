@@ -1,12 +1,7 @@
-# Bỏ qua thư mục ảo
-.venv/
-venv/
-env/
 
 
-data/
-errors.csv
-*.csv
+
+
 
 
 .idea/
